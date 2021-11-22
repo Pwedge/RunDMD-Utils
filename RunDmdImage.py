@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from struct import pack, unpack
+from enum import Enum
 import sys
 import os
 import yaml
@@ -73,78 +74,75 @@ class RunDmdHeader(object):
     
 
 class RunDmdAnimation(object):
-    ani_header_size = 512
-    frame_header_size = 512
-    frame_unit = 512
-    flag_enable = (1 << 0)
-    ani_header = [ # list in header byte order and width is in bytes
-        {'global_id' :          {'width' : 2}},
-        {'flags' :              {'width' : 1}},
-        {'num_bitmaps' :        {'width' : 1}},
-        {'frames_addr' :        {'width' : 4}},
-        {'total_frames' :       {'width' : 1}},
-        {'display_width' :      {'width' : 1}},
-        {'display_height' :     {'width' : 1}},
-        {'transparency_type' :  {'width' : 1}},
-        {'unknown_byte12' :     {'width' : 1}},
-        {'unknown_byte13' :     {'width' : 1}},
-        {'clock_size' :         {'width' : 1}},
-        {'clock_position_x' :   {'width' : 1}},
-        {'clock_position_y' :   {'width' : 1}},
-        {'clock_start_frame' :  {'width' : 1}},
-        {'clock_end_frame' :    {'width' : 1}},
-        {'unknown_byte19' :     {'width' : 1}},
-        {'name' :               {'width' : 32}}
+    block_size =                512
+    flags =                     {'Enable' : 0} # bit position numbers
+    clock_type =                {'NoClock' : 0, 'ClockBehind' : 1, 'ClockOnTop' : 2}
+    clock_size =                {'ClockSmall' : 0, 'ClockLarge' : 1}
+    animation_header = [ # list in header byte order and width is in bytes
+        ('global_id',           {'width' : 2}),
+        ('flags',               {'width' : 1, 'type' : 'flags', 'flag_bits' : flags}),
+        ('num_bitmaps',         {'width' : 1}), # Number of raw bitmaps stored in the image
+        ('frames_addr',         {'width' : 4, 'type' : 'granular', 'granular_unit' : block_size}),
+        ('total_frames',        {'width' : 1}), # Number of frames that will be displayed during animation after indirection
+        ('display_width',       {'width' : 1}),
+        ('display_height',      {'width' : 1}),
+        ('clock_type',          {'width' : 1, 'type' : 'enum', 'enum_vals' : clock_type}),
+        ('unknown_byte12',      {'width' : 1}),
+        ('unknown_byte13',      {'width' : 1}),
+        ('clock_size',          {'width' : 1, 'type' : 'enum', 'enum_vals' : clock_size}),
+        ('clock_position_x',    {'width' : 1}),
+        ('clock_position_y',    {'width' : 1}),
+        ('clock_start_frame',   {'width' : 1}),
+        ('clock_end_frame',     {'width' : 1}),
+        ('unknown_byte19',      {'width' : 1}),
+        ('name',                {'width' : 32, 'type' : 'string'})
+    ]
+    frames_header = [
+        ('bitmap_num',          {'width' : 1}),
+        ('frame_duration',      {'width' : 1})
     ]
 
     def __init__(self):
-        self.header = {
-            'name' : '__UNKNOWN__',
-            'global_id' : 0,
-            'flags' : 0,
-            'num_bitmaps' : 0,
-            'frames_addr' : 0x0,
-            'total_frames' : 0,
-            'display_width' : 0,
-            'display_height' : 0,
-            'transparency_type' : 0,
-            'clock_size' : 0,
-            'clock_position_x' : 0,
-            'clock_position_y' : 0,
-            'clock_start_frame' : 0,
-            'clock_end_frame' : 0,
-            'unknown_byte12' : 0,
-            'unknown_byte13' : 0,
-            'unknown_byte19' : 0
-        }
+        self.header = {}
         self.frames = []
         
-    def parse_binary_header(self, data):
-        header = unpack('>HBBIBBBBBBBBBBBB32s', data[:52])
-        self.header['global_id'] = header[0]
-        self.header['flags'] = header[1]
-        self.header['num_bitmaps'] = header[2] # Number of raw bitmaps stored in the image
-        self.header['frames_addr'] = header[3] * RunDmdAnimation.frame_unit
-        self.header['total_frames'] = header[4] # Number of frames that will be displayed during animation after indirection
-        self.header['display_width'] = header[5]
-        self.header['display_height'] = header[6]
-        self.header['transparency_type'] = header[7]
-        self.header['clock_size'] = header[10]
-        self.header['clock_position_x'] = header[11]
-        self.header['clock_position_y'] = header[12]
-        self.header['clock_start_frame'] = header[13]
-        self.header['clock_end_frame'] = header[14]
-        self.header['name'] = header[16].strip(b'\x00').decode('ascii')
-        self.header['unknown_byte12'] = header[8]
-        self.header['unknown_byte13'] = header[9]
-        self.header['unknown_byte19'] = header[15]
+    def parse_binary_animation_header(self, data):
+        cur_offset = 0
+        for field, params in RunDmdAnimation.animation_header:
+            width = params['width']
+            if 'type' in params and params['type'] == 'string':
+                field_val = unpack('>{}s'.format(width), data[cur_offset:cur_offset+width])[0].strip(b'\x00').decode('ascii')
+            else:
+                field_bytes = unpack('>{}'.format('B' * width), data[cur_offset:cur_offset+width])
+                field_val = 0
+                for field_byte in field_bytes:
+                    field_val |= (field_val << 8) | field_byte
+                if 'type' in params:
+                    if params['type'] == 'enum':
+                        for enum_key in params['enum_vals']:
+                            if params['enum_vals'][enum_key] == field_val:
+                                field_val = enum_key
+                                break
+                    elif params['type'] == 'flags':
+                        field_val_tmp = ''
+                        for flag_bit_key in params['flag_bits']:
+                            if field_val & (1 << params['flag_bits'][flag_bit_key]):
+                                field_val_tmp = ' | {}'.format(flag_bit_key)
+                        field_val = field_val_tmp[3:]
+                    elif params['type'] == 'granular':
+                        field_val *= params['granular_unit']
+            self.header[field] = field_val
+            cur_offset += width
+    
+    def parse_binary_frames(self):
+        pass
     
     def build_binary_header(self):
         return pack('>HBBIBBBBBBBBBBBB32s',
             self.header['global_id'],
             self.header['flags'],
             self.header['num_bitmaps'],
-            self.header['frames_addr'] // RunDmdAnimation.frame_unit,
+            self.header['frames_addr'] // RunDmdAnimation.block_size,
             self.header['total_frames'],
             self.header['display_width'],
             self.header['display_height'],
@@ -162,7 +160,7 @@ class RunDmdAnimation(object):
     def build_binary_frames(self):
         known_frames = {}
         frame_cnt = 0
-        ani_binary = bytearray(RunDmdAnimation.ani_header_size)
+        ani_binary = bytearray(RunDmdAnimation.block_size)
 
         for i, frame in enumerate(self.frames):
             if frame['bitmap'].hex() not in known_frames:
@@ -183,7 +181,7 @@ class RunDmdAnimation(object):
             raise ValueError
         with open(filepath, 'rb') as fh:
             fh.seek(addr)
-            self.parse_binary_header(fh.read(RunDmdAnimation.ani_header_size))
+            self.parse_binary_animation_header(fh.read(RunDmdAnimation.block_size))
             
             # New header at this address.  Indexed by frame_num and provides (bitmap_num, duration) tuples
             fh.seek(self.header['frames_addr'])
@@ -194,7 +192,7 @@ class RunDmdAnimation(object):
                 frame_id = frame_ids[i]
                 frame_dur = frame_durs[i]
                 bitmap_size = int(128 * 32 / 2)
-                addr = int(self.header['frames_addr'] + self.frame_header_size + bitmap_size * (frame_id - 1))
+                addr = int(self.header['frames_addr'] + self.block_size + bitmap_size * (frame_id - 1))
                 fh.seek(addr)
                 frame_data = fh.read(bitmap_size)
                 # Convert nibble -> byte
@@ -267,7 +265,7 @@ class RunDmdImage(object):
             if name not in self.animations:
                 self.animations[name] = []
             self.animations[name].append(ani)
-            cur_offset += RunDmdAnimation.ani_header_size
+            cur_offset += RunDmdAnimation.block_size
 
     def get_header(self):
         return self.header.dump_to_yaml()
