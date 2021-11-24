@@ -5,6 +5,7 @@ from enum import Enum
 import sys
 import os
 import yaml
+import json
 
 class BinaryHandler(object):
     def __init__(self):
@@ -138,7 +139,9 @@ class RunDmdHeader(object):
 
 class RunDmdAnimation(object):
     block_size =                512
-    bitmap_size =               128 * 32 // 2
+    bitmap_width =              128
+    bitmap_height =             32
+    bitmap_size =               bitmap_width * bitmap_height // 2 # One pixel per nibble
     flags =                     {'Enable' : 0} # bit position numbers
     clock_type =                {'NoClock' : 0, 'ClockBehind' : 1, 'ClockOnTop' : 2}
     clock_size =                {'ClockSmall' : 0, 'ClockLarge' : 1}
@@ -169,10 +172,25 @@ class RunDmdAnimation(object):
     def __init__(self):
         self.header = {}
         self.frames = []
+    
+    def _frame_to_rows(self, frame_data):
+        frame_rows = []
+        for i in range(0, self.bitmap_width * self.bitmap_height, self.bitmap_width):
+            frame_rows.append('|{}|'.format(frame_data[i:i+self.bitmap_width]))
+        return frame_rows
+    
+    def _rows_to_frame(self, frame_rows):
+        frame = ''
+        for row in frame_rows:
+            if row[0] != '|' or row[-1:] != '|':
+                print('Frame parsing failed')
+                return False
+            frame += row[1:-1]
+        return frame
         
     def parse_binary_animation_header(self, data):
-        self.header = BinaryHandler().parse_binary(RunDmdAnimation.animation_header_format, data)
-        # recreated_bytes = BinaryHandler().binary_build(RunDmdAnimation.animation_header_format, self.header)
+        self.header = BinaryHandler().parse_binary(self.animation_header_format, data)
+        # recreated_bytes = BinaryHandler().binary_build(self.animation_header_format, self.header)
         # if (recreated_bytes != data[:len(recreated_bytes)]):
         #     print('The extracted and recreated are not binary equivalents!')
         #     print('{}'.format(data[:len(recreated_bytes)].hex()))
@@ -180,19 +198,19 @@ class RunDmdAnimation(object):
         #     sys.exit(1)
     
     def build_binary_animation_header(self):
-        return BinaryHandler().create_binary(RunDmdAnimation.animation_header_format, self.header)
+        return BinaryHandler().create_binary(self.animation_header_format, self.header)
     
     def parse_binary_frames(self, data):
         for i in range(self.header['total_frames']):
-            frame_to_bitmap_info = BinaryHandler().parse_binary(RunDmdAnimation.frames_header_format, data[i*2:i*2+2])
-            bitmap_addr = (frame_to_bitmap_info['bitmap_num'] - 1) * RunDmdAnimation.bitmap_size + RunDmdAnimation.block_size
-            frame_data_str = data[bitmap_addr:bitmap_addr+RunDmdAnimation.bitmap_size].hex()
-            self.frames.append({'duration' : frame_to_bitmap_info['frame_duration'], 'bitmap' : frame_data_str})
+            frame_to_bitmap_info = BinaryHandler().parse_binary(self.frames_header_format, data[i*2:i*2+2])
+            bitmap_addr = (frame_to_bitmap_info['bitmap_num'] - 1) * self.bitmap_size + self.block_size
+            frame_rows_list = self._frame_to_rows(data[bitmap_addr:bitmap_addr+self.bitmap_size].hex())
+            self.frames.append({'duration' : frame_to_bitmap_info['frame_duration'], 'bitmap' : frame_rows_list})
 
     def build_binary_frames(self):
         known_frames = {}
         frame_cnt = 0
-        ani_binary = bytearray(RunDmdAnimation.block_size)
+        ani_binary = bytearray(self.block_size)
 
         for i, frame in enumerate(self.frames):
             if frame['bitmap'].hex() not in known_frames:
@@ -214,11 +232,11 @@ class RunDmdAnimation(object):
         with open(filepath, 'rb') as fh:
             # Main animation header
             fh.seek(addr)
-            self.parse_binary_animation_header(fh.read(RunDmdAnimation.block_size))
+            self.parse_binary_animation_header(fh.read(self.block_size))
 
             # Frame header and bitmaps
             frame_start_addr = self.header['frames_addr']
-            frame_data_len = RunDmdAnimation.block_size + RunDmdAnimation.bitmap_size * self.header['num_bitmaps']
+            frame_data_len = self.block_size + self.bitmap_size * self.header['num_bitmaps']
             fh.seek(frame_start_addr)
             self.parse_binary_frames(fh.read(frame_data_len))
             print('Tore through {}'.format(self.header['name']))
@@ -233,8 +251,8 @@ class RunDmdAnimation(object):
             for key in sorted(frame):
                 if key == 'bitmap':
                     print('  {}:'.format(key))
-                    for i in range(0, 128 * 32, 128):
-                        print('    {}'.format(frame[key][i:i+128]))
+                    for i in range(0, self.bitmap_width * self.bitmap_height, self.bitmap_width):
+                        print('    {}'.format(frame[key][i:i+self.bitmap_width]))
                 else:
                     print('  {}: {}'.format(key, frame[key]))
 
@@ -254,11 +272,10 @@ class RunDmdAnimation(object):
     def dump_to_yaml(self):
         formatted_frames = []
         for frame in self.frames:
-            frame_rows = []
-            for i in range(0, 128 * 32, 128):
-                frame_rows.append('|{}|'.format(frame['bitmap'][i:i+128]))
-            formatted_frames.append({'duration' : frame['duration'], 'bitmap' : frame_rows})
+            formatted_frames.append({'duration' : frame['duration'], 'bitmap' : frame['bitmap']})
         out = {'header' : self.header, 'frames' : formatted_frames}
+        return json.dumps(out, indent=2)
+        return '{}'.format(out)
         return yaml.dump(out)
 
     @property

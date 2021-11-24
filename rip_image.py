@@ -18,7 +18,7 @@ def parse_arguments():
 
     parser = argparse.ArgumentParser(description='Rip all headers and animations from a RunDMD binary image')
     parser.add_argument('--image', help='RunDMD raw binary image path', type=argparse.FileType('r'), required=True)
-    parser.add_argument('--output-dir', help='Path to extract the RunDMD yaml files to', type=dir_path, required=True)
+    parser.add_argument('--output-dir', help='Path to extract the RunDMD json files to', type=dir_path, required=True)
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -26,18 +26,18 @@ if __name__ == '__main__':
 
     rundmd = RunDmdImage.RunDmdImage()
     rundmd.load_full_binary(args.image.name)
-    main_header_yaml = rundmd.get_header()
+    main_header_json = rundmd.get_header()
     output_dir = os.path.abspath(args.output_dir)
     os.chdir(output_dir)
     print('Writing main header')
-    with open ('header.yaml', 'w') as fh:
-        fh.write(main_header_yaml)
+    with open ('header.json', 'w') as fh:
+        fh.write(main_header_json)
 
     prev_ani_name = None
     cur_ani_cnt = 0
     for ani in rundmd.get_animations():
-        ani_name, ani_yaml = ani
-        print('Processing yaml {}'.format(ani_name))
+        ani_name, ani_json = ani
+        print('Processing json {}'.format(ani_name))
         if prev_ani_name != ani_name:
             ani_path = os.path.join(output_dir, ani_name)
             if not os.path.isdir(ani_path):
@@ -45,8 +45,8 @@ if __name__ == '__main__':
             os.chdir(ani_path)
             prev_ani_name = ani_name
             cur_ani_cnt = 0
-        cur_file = '{}_{:03d}.yaml'.format(ani_name, cur_ani_cnt)
+        cur_file = '{}_{:03d}.json'.format(ani_name, cur_ani_cnt)
         print('Processing: file {}'.format(cur_file))
         with open(cur_file, 'w') as fh:
-            fh.write(ani_yaml)
+            fh.write(ani_json)
         cur_ani_cnt += 1
