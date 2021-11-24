@@ -10,7 +10,7 @@ class BinaryHandler(object):
     def __init__(self):
         return
     
-    def binary_extract(self, binary_format, data):
+    def parse_binary(self, binary_format, data):
         parsed = {}
         cur_offset = 0
         for field, params in binary_format:
@@ -35,14 +35,12 @@ class BinaryHandler(object):
                                 field_val_tmp = ' | {}'.format(flag_bit_key)
                         field_val = field_val_tmp[3:]
                     elif params['type'] == 'granular':
-                        print('extract: {}'.format(field_val))
                         field_val = int(field_val * params['granular_unit'])
-                        print('extract: {}'.format(field_val))
             parsed[field] = field_val
             cur_offset += width
         return parsed
     
-    def binary_create(self, binary_format, data):
+    def create_binary(self, binary_format, data):
         binary_data = bytearray()
         for field, params in binary_format:
             width = params['width']
@@ -64,9 +62,7 @@ class BinaryHandler(object):
                         if flag in params['flag_bits']:
                             field_val |= 1 << params['flag_bits'][flag]
                 elif params['type'] == 'granular':
-                    print('build: {}'.format(field_val))
                     field_val = int(field_val / params['granular_unit'])
-                    print('build: {}'.format(field_val))
             if byte_vals == None:
                 byte_vals = field_val.to_bytes(width, 'big')
             binary_data += byte_vals
@@ -142,6 +138,7 @@ class RunDmdHeader(object):
 
 class RunDmdAnimation(object):
     block_size =                512
+    bitmap_size =               128 * 32 // 2
     flags =                     {'Enable' : 0} # bit position numbers
     clock_type =                {'NoClock' : 0, 'ClockBehind' : 1, 'ClockOnTop' : 2}
     clock_size =                {'ClockSmall' : 0, 'ClockLarge' : 1}
@@ -164,7 +161,7 @@ class RunDmdAnimation(object):
         ('unknown_byte19',      {'width' : 1}),
         ('name',                {'width' : 32, 'type' : 'string'})
     ]
-    frames_header = [
+    frames_header_format = [
         ('bitmap_num',          {'width' : 1}),
         ('frame_duration',      {'width' : 1})
     ]
@@ -174,20 +171,23 @@ class RunDmdAnimation(object):
         self.frames = []
         
     def parse_binary_animation_header(self, data):
-        self.header = BinaryHandler().binary_extract(RunDmdAnimation.animation_header_format, data)
+        self.header = BinaryHandler().parse_binary(RunDmdAnimation.animation_header_format, data)
         # recreated_bytes = BinaryHandler().binary_build(RunDmdAnimation.animation_header_format, self.header)
         # if (recreated_bytes != data[:len(recreated_bytes)]):
         #     print('The extracted and recreated are not binary equivalents!')
         #     print('{}'.format(data[:len(recreated_bytes)].hex()))
         #     print('{}'.format(recreated_bytes.hex()))
         #     sys.exit(1)
-
     
-    def parse_binary_frames(self):
-        pass
+    def build_binary_animation_header(self):
+        return BinaryHandler().create_binary(RunDmdAnimation.animation_header_format, self.header)
     
-    def build_binary_header(self):
-        return BinaryHandler().binary_create(RunDmdAnimation.animation_header_format, self.header)
+    def parse_binary_frames(self, data):
+        for i in range(self.header['total_frames']):
+            frame_to_bitmap_info = BinaryHandler().parse_binary(RunDmdAnimation.frames_header_format, data[i*2:i*2+2])
+            bitmap_addr = (frame_to_bitmap_info['bitmap_num'] - 1) * RunDmdAnimation.bitmap_size + RunDmdAnimation.block_size
+            frame_data_str = data[bitmap_addr:bitmap_addr+RunDmdAnimation.bitmap_size].hex()
+            self.frames.append({'duration' : frame_to_bitmap_info['frame_duration'], 'bitmap' : frame_data_str})
 
     def build_binary_frames(self):
         known_frames = {}
@@ -212,26 +212,31 @@ class RunDmdAnimation(object):
         if not os.path.isfile(filepath):
             raise ValueError
         with open(filepath, 'rb') as fh:
+            # Main animation header
             fh.seek(addr)
             self.parse_binary_animation_header(fh.read(RunDmdAnimation.block_size))
-            
-            # New header at this address.  Indexed by frame_num and provides (bitmap_num, duration) tuples
-            fh.seek(self.header['frames_addr'])
-            frame_header = fh.read(2 * self.header['total_frames'])
-            frame_ids = frame_header[0::2]
-            frame_durs = frame_header[1::2]
-            for i in range(self.header['total_frames']):
-                frame_id = frame_ids[i]
-                frame_dur = frame_durs[i]
-                bitmap_size = int(128 * 32 / 2)
-                addr = int(self.header['frames_addr'] + self.block_size + bitmap_size * (frame_id - 1))
-                fh.seek(addr)
-                frame_data = fh.read(bitmap_size)
-                # Convert nibble -> byte
-                frame = bytearray(128 * 32)
-                frame[0::2] = [((i & 0xf0) >> 4) for i in frame_data]
-                frame[1::2] = [(i & 0xf) for i in frame_data]
-                self.frames.append({'duration' : frame_dur, 'bitmap' : frame}) # Duration in ms
+
+            # Frame header and bitmaps
+            frame_start_addr = self.header['frames_addr']
+            frame_data_len = RunDmdAnimation.block_size + RunDmdAnimation.bitmap_size * self.header['num_bitmaps']
+            fh.seek(frame_start_addr)
+            self.parse_binary_frames(fh.read(frame_data_len))
+            print('Tore through {}'.format(self.header['name']))
+    
+    def debug_dump(self):
+        print('Here is the header:')
+        for key in sorted(self.header):
+            print('  {}: {}'.format(key, self.header[key]))
+        print('')
+        print('Here are the frames:')
+        for frame in self.frames:
+            for key in sorted(frame):
+                if key == 'bitmap':
+                    print('  {}:'.format(key))
+                    for i in range(0, 128 * 32, 128):
+                        print('    {}'.format(frame[key][i:i+128]))
+                else:
+                    print('  {}: {}'.format(key, frame[key]))
 
     def load_from_yaml(self, filepath):
         if not os.path.isfile(filepath):
@@ -249,20 +254,10 @@ class RunDmdAnimation(object):
     def dump_to_yaml(self):
         formatted_frames = []
         for frame in self.frames:
-            bitmap_lst = []
+            frame_rows = []
             for i in range(0, 128 * 32, 128):
-                row = frame['bitmap'][i:i+128]
-                row_str = '|'
-                for val in row:
-                    if val >= 0x0 and val <= 0x9:
-                        row_str += chr(val + 0x30)
-                    elif val >= 0xa and val <= 0xf:
-                        row_str += chr(val + 0x61 - 0xa)
-                    else:
-                        row_str += '?'
-                row_str += '|'
-                bitmap_lst.append(row_str)
-            formatted_frames.append({'duration' : frame['duration'], 'bitmap' : bitmap_lst})
+                frame_rows.append('|{}|'.format(frame['bitmap'][i:i+128]))
+            formatted_frames.append({'duration' : frame['duration'], 'bitmap' : frame_rows})
         out = {'header' : self.header, 'frames' : formatted_frames}
         return yaml.dump(out)
 
