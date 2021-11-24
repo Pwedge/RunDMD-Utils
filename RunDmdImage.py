@@ -6,6 +6,73 @@ import sys
 import os
 import yaml
 
+class BinaryHandler(object):
+    def __init__(self):
+        return
+    
+    def binary_extract(self, binary_format, data):
+        parsed = {}
+        cur_offset = 0
+        for field, params in binary_format:
+            width = params['width']
+            if 'type' in params and params['type'] == 'string':
+                field_val = unpack('>{}s'.format(width), data[cur_offset:cur_offset+width])[0].strip(b'\x00').decode('ascii')
+            else:
+                field_bytes = unpack('>{}'.format('B' * width), data[cur_offset:cur_offset+width])
+                field_val = 0
+                for field_byte in field_bytes:
+                    field_val = (field_val << 8) | field_byte
+                if 'type' in params:
+                    if params['type'] == 'enum':
+                        for enum_key in params['enum_vals']:
+                            if params['enum_vals'][enum_key] == field_val:
+                                field_val = enum_key
+                                break
+                    elif params['type'] == 'flags':
+                        field_val_tmp = ''
+                        for flag_bit_key in params['flag_bits']:
+                            if field_val & (1 << params['flag_bits'][flag_bit_key]):
+                                field_val_tmp = ' | {}'.format(flag_bit_key)
+                        field_val = field_val_tmp[3:]
+                    elif params['type'] == 'granular':
+                        print('extract: {}'.format(field_val))
+                        field_val = int(field_val * params['granular_unit'])
+                        print('extract: {}'.format(field_val))
+            parsed[field] = field_val
+            cur_offset += width
+        return parsed
+    
+    def binary_create(self, binary_format, data):
+        binary_data = bytearray()
+        for field, params in binary_format:
+            width = params['width']
+            field_val = data[field]
+            byte_vals = None
+
+            if 'type' in params:
+                if params['type'] == 'string':
+                    byte_vals = pack('>{}s'.format(width), data[field].encode('ascii'))
+                elif params['type'] == 'enum':
+                    for enum_key in params['enum_vals']:
+                        if enum_key == field_val:
+                            field_val = params['enum_vals'][enum_key]
+                            break
+                elif params['type'] == 'flags':
+                    flags = [f.strip() for f in field_val.split('|')]
+                    field_val = 0
+                    for flag in flags:
+                        if flag in params['flag_bits']:
+                            field_val |= 1 << params['flag_bits'][flag]
+                elif params['type'] == 'granular':
+                    print('build: {}'.format(field_val))
+                    field_val = int(field_val / params['granular_unit'])
+                    print('build: {}'.format(field_val))
+            if byte_vals == None:
+                byte_vals = field_val.to_bytes(width, 'big')
+            binary_data += byte_vals
+        return binary_data
+
+
 class RunDmdHeader(object):
     image_header_size = 512
     image_marker = 'DGD'
@@ -78,7 +145,7 @@ class RunDmdAnimation(object):
     flags =                     {'Enable' : 0} # bit position numbers
     clock_type =                {'NoClock' : 0, 'ClockBehind' : 1, 'ClockOnTop' : 2}
     clock_size =                {'ClockSmall' : 0, 'ClockLarge' : 1}
-    animation_header = [ # list in header byte order and width is in bytes
+    animation_header_format = [ # list in header byte order and width is in bytes
         ('global_id',           {'width' : 2}),
         ('flags',               {'width' : 1, 'type' : 'flags', 'flag_bits' : flags}),
         ('num_bitmaps',         {'width' : 1}), # Number of raw bitmaps stored in the image
@@ -107,55 +174,20 @@ class RunDmdAnimation(object):
         self.frames = []
         
     def parse_binary_animation_header(self, data):
-        cur_offset = 0
-        for field, params in RunDmdAnimation.animation_header:
-            width = params['width']
-            if 'type' in params and params['type'] == 'string':
-                field_val = unpack('>{}s'.format(width), data[cur_offset:cur_offset+width])[0].strip(b'\x00').decode('ascii')
-            else:
-                field_bytes = unpack('>{}'.format('B' * width), data[cur_offset:cur_offset+width])
-                field_val = 0
-                for field_byte in field_bytes:
-                    field_val |= (field_val << 8) | field_byte
-                if 'type' in params:
-                    if params['type'] == 'enum':
-                        for enum_key in params['enum_vals']:
-                            if params['enum_vals'][enum_key] == field_val:
-                                field_val = enum_key
-                                break
-                    elif params['type'] == 'flags':
-                        field_val_tmp = ''
-                        for flag_bit_key in params['flag_bits']:
-                            if field_val & (1 << params['flag_bits'][flag_bit_key]):
-                                field_val_tmp = ' | {}'.format(flag_bit_key)
-                        field_val = field_val_tmp[3:]
-                    elif params['type'] == 'granular':
-                        field_val *= params['granular_unit']
-            self.header[field] = field_val
-            cur_offset += width
+        self.header = BinaryHandler().binary_extract(RunDmdAnimation.animation_header_format, data)
+        # recreated_bytes = BinaryHandler().binary_build(RunDmdAnimation.animation_header_format, self.header)
+        # if (recreated_bytes != data[:len(recreated_bytes)]):
+        #     print('The extracted and recreated are not binary equivalents!')
+        #     print('{}'.format(data[:len(recreated_bytes)].hex()))
+        #     print('{}'.format(recreated_bytes.hex()))
+        #     sys.exit(1)
+
     
     def parse_binary_frames(self):
         pass
     
     def build_binary_header(self):
-        return pack('>HBBIBBBBBBBBBBBB32s',
-            self.header['global_id'],
-            self.header['flags'],
-            self.header['num_bitmaps'],
-            self.header['frames_addr'] // RunDmdAnimation.block_size,
-            self.header['total_frames'],
-            self.header['display_width'],
-            self.header['display_height'],
-            self.header['transparency_type'],
-            self.header['unknown_byte12'],
-            self.header['unknown_byte13'],
-            self.header['clock_size'],
-            self.header['clock_position_x'],
-            self.header['clock_position_y'],
-            self.header['clock_start_frame'],
-            self.header['clock_end_frame'],
-            self.header['unknown_byte19'],
-            self.header['name'].encode('ascii', 'replace'))
+        return BinaryHandler().binary_create(RunDmdAnimation.animation_header_format, self.header)
 
     def build_binary_frames(self):
         known_frames = {}
