@@ -4,7 +4,6 @@ from struct import pack, unpack
 from enum import Enum
 import sys
 import os
-import yaml
 import json
 
 class BinaryHandler(object):
@@ -71,70 +70,41 @@ class BinaryHandler(object):
 
 
 class RunDmdHeader(object):
-    image_header_size = 512
-    image_marker = 'DGD'
-    startup_pic_size = 0xc600 
+    block_size =                512
+    image_marker =              'DGD'
+    startup_pic_size =          0xc600
+    main_header_format = [ # list in header byte order and width is in bytes
+        ('marker',              {'width' : 3, 'type' : 'string'}),
+        ('total_animations',    {'width' : 2}),
+        ('unknown_field1',      {'width' : 16}),
+        ('enabled_animations',  {'width' : 2}),
+        ('unknown_field2',      {'width' : 472}),
+        ('version',             {'width' : 4, 'type' : 'string'}),
+        ('unknown_field3',      {'width' : 13}),
+        ('startup_picture',     {'width' : startup_pic_size})
+    ]
 
     def __init__(self):
-        self.header = {
-            'total_animations' : 0,
-            'unknown1' : 0,
-            'enabled_animations' : 0,
-            'unknown2' : 0,
-            'version' : 'X000',
-            'unknown3' : 0,
-        }
-        self.startup_pic = bytearray(RunDmdHeader.startup_pic_size)
-        for i in range(RunDmdHeader.startup_pic_size):
-            self.startup_pic[i] = i & 0xf
-
-    def parse_binary_header(self, data):
-        header = unpack('>3sH16sH472s4s13s', data[:RunDmdHeader.image_header_size])
-        if header[0].decode('ascii') != RunDmdHeader.image_marker:
-            raise
-        self.header['total_animations'] = header[1]
-        self.header['unknown1'] = header[2]
-        self.header['enabled_animations'] = header[3]
-        self.header['unknown2'] = header[4]
-        self.header['version'] = header[5].decode('ascii')
-        self.header['unknown3'] = header[6]
-
-    def build_binary_header(self):
-        return pack('>3sH16sH472s4s13s',
-            self.header['total_animations'],
-            self.header['unknown1'],
-            self.header['enabled_animations'],
-            self.header['unknown2'],
-            self.header['version'].encode('ascii'),
-            self.header['unknown3'])
-
-    def load_from_binary(self, filepath, addr=0):
-        if not os.path.isfile(filepath):
-            raise ValueError
-        with open(filepath, 'rb') as fh:
-            fh.seek(addr)
-            self.parse_binary_header(fh.read(RunDmdHeader.image_header_size))
-
-    def load_from_yaml(self, filepath):
-        if not os.path.isfile(filepath):
-            raise ValueError
-        with open(filepath, 'r') as fh:
-            yaml_data = yaml.safe_load(fh)
-        self.header.update(yaml_data['header'])
-
-    def dump_to_binary(self):
-        return self.build_binary_header()
+        self.header = {}
     
-    def dump_to_yaml(self):
-        out = {'header' : self.header}
-        return yaml.dump(out)
+    # Main loaders and builders start
+    def load_binary_data(self, data):
+        self.header = BinaryHandler().parse_binary(self.main_header_format, data)
+        if self.header['marker'] != self.image_marker:
+            print('Binary did not have the correct marker')
+            return False
+
+    def load_json_data(self, json_data):
+        data = json.loads(json_data)
+        self.header.update(data)
     
-    @property
-    def total_animations(self):
-        return self.header['total_animations']
-    @total_animations.setter
-    def total_animations(self, value):
-        self.header['total_animations'] = value
+    def build_binary_data(self):
+        binary_data = BinaryHandler().create_binary(self.main_header_format, self.header)
+        return binary_data
+    
+    def build_json_data(self):
+        return json.dumps(self.header, indent=2)
+    # Main loaders and builders end
     
 
 class RunDmdAnimation(object):
@@ -166,13 +136,14 @@ class RunDmdAnimation(object):
     ]
     frames_header_format = [
         ('bitmap_num',          {'width' : 1}),
-        ('frame_duration',      {'width' : 1})
+        ('duration',            {'width' : 1})
     ]
 
     def __init__(self):
         self.header = {}
         self.frames = []
     
+    # Helper methods start
     def _frame_to_rows(self, frame_data):
         frame_rows = []
         for i in range(0, self.bitmap_width * self.bitmap_height, self.bitmap_width):
@@ -187,60 +158,83 @@ class RunDmdAnimation(object):
                 return False
             frame += row[1:-1]
         return frame
-        
-    def parse_binary_animation_header(self, data):
+    # Helper methods end
+    
+
+    # Animation header handling start
+    def load_binary_animation_header(self, data):
         self.header = BinaryHandler().parse_binary(self.animation_header_format, data)
-        # recreated_bytes = BinaryHandler().binary_build(self.animation_header_format, self.header)
-        # if (recreated_bytes != data[:len(recreated_bytes)]):
-        #     print('The extracted and recreated are not binary equivalents!')
-        #     print('{}'.format(data[:len(recreated_bytes)].hex()))
-        #     print('{}'.format(recreated_bytes.hex()))
-        #     sys.exit(1)
+
+    def load_json_animation_header(self, json_data):
+        data = json.loads(json_data)
+        self.header.update(data)
     
     def build_binary_animation_header(self):
-        return BinaryHandler().create_binary(self.animation_header_format, self.header)
+        binary_data = BinaryHandler().create_binary(self.animation_header_format, self.header)
+        padding = bytearray(self.block_size - len(binary_data))
+        return binary_data + padding
     
-    def parse_binary_frames(self, data):
+    def build_json_animation_header(self):
+        return json.dumps(self.header, indent=2)
+    # Animation header handling end
+    
+    
+    # Frame handling start
+    def load_binary_frames(self, data):
         for i in range(self.header['total_frames']):
             frame_to_bitmap_info = BinaryHandler().parse_binary(self.frames_header_format, data[i*2:i*2+2])
             bitmap_addr = (frame_to_bitmap_info['bitmap_num'] - 1) * self.bitmap_size + self.block_size
             frame_rows_list = self._frame_to_rows(data[bitmap_addr:bitmap_addr+self.bitmap_size].hex())
-            self.frames.append({'duration' : frame_to_bitmap_info['frame_duration'], 'bitmap' : frame_rows_list})
-
-    def build_binary_frames(self):
-        known_frames = {}
-        frame_cnt = 0
-        ani_binary = bytearray(self.block_size)
-
-        for i, frame in enumerate(self.frames):
-            if frame['bitmap'].hex() not in known_frames:
-                old_size = len(ani_binary)
-                # New bitmap
-                known_frames[frame['bitmap'].hex()] = frame_cnt
-                frame_cnt += 1
-                frame_binary = bytearray(128 * 32 // 2)
-                for j, (pixel_h, pixel_l) in enumerate(zip(frame['bitmap'][::2], frame['bitmap'][1::2])):
-                    frame_binary[j] = ((pixel_h & 0xf) << 4) | (pixel_l & 0xf)
-                ani_binary += frame_binary
-            ani_binary[i*2] = known_frames[frame['bitmap'].hex()]
-            ani_binary[i*2+1] = frame['duration']
-        return ani_binary
-
-    def load_from_binary(self, filepath, addr):
-        if not os.path.isfile(filepath):
-            raise ValueError
-        with open(filepath, 'rb') as fh:
-            # Main animation header
-            fh.seek(addr)
-            self.parse_binary_animation_header(fh.read(self.block_size))
-
-            # Frame header and bitmaps
-            frame_start_addr = self.header['frames_addr']
-            frame_data_len = self.block_size + self.bitmap_size * self.header['num_bitmaps']
-            fh.seek(frame_start_addr)
-            self.parse_binary_frames(fh.read(frame_data_len))
-            print('Tore through {}'.format(self.header['name']))
+            self.frames.append({'duration' : frame_to_bitmap_info['duration'], 'bitmap' : frame_rows_list})
     
+    def load_json_frames(self, json_data):
+        data = json.loads(json_data)
+        self.frames = data
+    
+    def build_binary_frames(self):
+        known_bitmaps = {}
+        animation_binary = bytearray(self.block_size)
+
+        for i, frame_info in enumerate(self.frames):
+            bitmap = self._rows_to_frame(frame_info['bitmap'])
+            if bitmap not in known_bitmaps:
+                # New bitmap
+                known_bitmaps[bitmap] = len(known_bitmaps) + 1
+                bitmap_binary = bytearray.fromhex(bitmap)
+                animation_binary += bitmap_binary
+            tmp_info = BinaryHandler().create_binary(self.frames_header_format, {'duration' : frame_info['duration'], 'bitmap_num' : known_bitmaps[bitmap]})
+            animation_binary[i*2:i*2+2] = tmp_info
+        return animation_binary
+    
+    def build_json_frames(self):
+        return json.dumps(self.frames, indent=2)
+    # Frame handling end
+    
+
+    # Main loaders and builders start
+    def load_binary_data(self, header_data, frames_data):
+        self.load_binary_animation_header(header_data)
+        self.load_binary_frames(frames_data)
+    
+    def load_json_data(self, json_data):
+        self.load_json_animation_header(json_data['header'])
+        self.load_json_frames(json_data['frames'])
+
+    def build_binary_data(self):
+        header = self.build_binary_header()
+        frames = self.build_binary_frames()
+        return (header, frames)
+    
+    def build_json_data(self):
+        formatted_frames = []
+        for frame in self.frames:
+            formatted_frames.append({'duration' : frame['duration'], 'bitmap' : frame['bitmap']})
+        out = {'header' : self.header, 'frames' : formatted_frames}
+        return json.dumps(out, indent=2)
+    # Main loaders and builders end
+    
+
+    # Debug methods start
     def debug_dump(self):
         print('Here is the header:')
         for key in sorted(self.header):
@@ -251,46 +245,50 @@ class RunDmdAnimation(object):
             for key in sorted(frame):
                 if key == 'bitmap':
                     print('  {}:'.format(key))
-                    for i in range(0, self.bitmap_width * self.bitmap_height, self.bitmap_width):
-                        print('    {}'.format(frame[key][i:i+self.bitmap_width]))
+                    for row in frame['bitmap']:
+                        print('    {}'.format(row))
                 else:
                     print('  {}: {}'.format(key, frame[key]))
-
-    def load_from_yaml(self, filepath):
-        if not os.path.isfile(filepath):
-            raise ValueError
-        with open(filepath, 'r') as fh:
-            yaml_data = yaml.safe_load(fh)
-        self.header.update(yaml_data['header'])
-        self.frames = yaml_data['frames']
     
-    def dump_to_binary(self):
-        header = self.build_binary_header()
-        frames = self.build_binary_frames()
-        return (header, frames)
-
-    def dump_to_yaml(self):
-        formatted_frames = []
-        for frame in self.frames:
-            formatted_frames.append({'duration' : frame['duration'], 'bitmap' : frame['bitmap']})
-        out = {'header' : self.header, 'frames' : formatted_frames}
-        return json.dumps(out, indent=2)
-        return '{}'.format(out)
-        return yaml.dump(out)
-
-    @property
-    def global_id(self):
-        return self.header['global_id']
-    @global_id.setter
-    def global_id(self, val):
-        self.header['global_id'] = val
+    def sanity_check_animation_header(self, binary_data):
+        # binary -> dic -> json -> dic -> binary
+        self.load_binary_animation_header(binary_data)
+        orig_dic = self.header.copy()
+        
+        json_str = self.build_json_animation_header()
+        self.load_json_animation_header(json_str)
+        new_dic = self.header.copy()
+        if new_dic != orig_dic:
+            print('After JSON load, the header data no longer matches')
+            sys.exit(1)
+        
+        new_binary_data = self.build_binary_animation_header()
+        if new_binary_data != binary_data:
+            print('After binary dump, the header data no longer matches')
+            print('{}'.format(binary_data.hex()))
+            print('{}'.format(new_binary_data.hex()))
+            sys.exit(1)
     
-    @property
-    def name(self):
-            return self.header['name']
-    @name.setter
-    def name(self, val):
-        self.header['name'] = val
+    def sanity_check_frames(self, binary_data):
+        # binary -> dic -> json -> dic -> binary
+        self.load_binary_frames(binary_data)
+        orig_lst = self.frames.copy()
+        
+        json_str = self.build_json_frames()
+        self.load_json_frames(json_str)
+        new_lst = self.frames.copy()
+        if new_lst != orig_lst:
+            print('After JSON load, the frame data no longer matches')
+            sys.exit(1)
+        
+        new_binary_data = self.build_binary_frames()
+        if new_binary_data != binary_data:
+            print('After binary dump, the frame data no longer matches')
+            #print('{}'.format(binary_data.hex()[0:50]))
+            #print('{}'.format(new_binary_data.hex()[0:50]))
+            #sys.exit(1)
+    # Debug methods end
+
 
 class RunDmdImage(object):
     def __init__(self):
@@ -299,54 +297,44 @@ class RunDmdImage(object):
         return
 
     def load_full_binary(self, fname):
-        self.header.load_from_binary(fname)
-        cur_offset = RunDmdHeader.image_header_size + RunDmdHeader.startup_pic_size
-        for i in range(self.header.total_animations):
-            ani = RunDmdAnimation()
-            ani.load_from_binary(fname, cur_offset)
-            full_name = ani.name
-            name = full_name[:full_name.rfind('_')]
-            if name not in self.animations:
-                self.animations[name] = []
-            self.animations[name].append(ani)
-            cur_offset += RunDmdAnimation.block_size
+        offset = 0
+        with open(fname, 'rb') as fh:
+            # Main header
+            fh.seek(0)
+            segment_size = RunDmdHeader.block_size + RunDmdHeader.startup_pic_size
+            data = fh.read(segment_size)
+            self.header.load_binary_data(data)
+            offset += segment_size
+
+            # Animations
+            for i in range(self.header.header['total_animations']):
+                ani = RunDmdAnimation()
+
+                # Animation header
+                header_segment_size = ani.block_size
+                fh.seek(offset)
+                header_data = fh.read(header_segment_size)
+                ani.load_binary_animation_header(header_data)
+                offset += header_segment_size
+
+                # Animation frames
+                frames_offset = ani.header['frames_addr']
+                frames_segment_size = ani.header['num_bitmaps'] * ani.bitmap_size + ani.block_size
+                fh.seek(frames_offset)
+                frame_data = fh.read(frames_segment_size)
+                ani.load_binary_frames(frame_data)
+
+                # Add it
+                full_name = ani.header['name']
+                name = full_name[:full_name.rfind('_')]
+                if name not in self.animations:
+                    self.animations[name] = []
+                self.animations[name].append(ani)
 
     def get_header(self):
-        return self.header.dump_to_yaml()
+        return self.header.build_json_data()
     
     def get_animations(self):
         for key in sorted(self.animations):
             for ani in self.animations[key]:
-                yield (key, ani.dump_to_yaml())
-
-
-
-
-
-if __name__ == '__main__':
-    import sys
-
-    fname = sys.argv[1]
-
-    rundmd_image = RunDmdImage()
-    rundmd_image.load_from_binary(fname)
-
-    addr = 0x105400
-    #addr = 0xcc00
-    rundmd_ani = RunDmdAnimation()
-    rundmd_ani.load_from_binary(fname, addr)
-    print('{}'.format(rundmd_ani.dump_to_yaml()))
-    print('{}'.format(rundmd_ani.build_binary_header().hex()))
-    print('{}'.format(rundmd_ani.build_binary_frames().hex()))
-
-    with open('test.yaml', 'w') as fh:
-        fh.write(rundmd_ani.dump_to_yaml())
-
-
-
-
-
-
-
-
-
+                yield (key, ani.build_json_data())
