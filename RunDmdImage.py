@@ -217,8 +217,9 @@ class RunDmdAnimation(object):
         self.load_binary_frames(frames_data)
     
     def load_json_data(self, json_data):
-        self.load_json_animation_header(json_data['header'])
-        self.load_json_frames(json_data['frames'])
+        data = json.loads(json_data)
+        self.load_json_animation_header(json.dumps(data['header']))
+        self.load_json_frames(json.dumps(data['frames']))
 
     def build_binary_data(self):
         header = self.build_binary_header()
@@ -330,6 +331,77 @@ class RunDmdImage(object):
                 if name not in self.animations:
                     self.animations[name] = []
                 self.animations[name].append(ani)
+    
+    def load_json_header_data(self, json_data):
+        self.header.load_json_data(json_data)
+    
+    def load_json_animation_data(self, json_data):
+        ani = RunDmdAnimation()
+        ani.load_json_data(json_data)        
+        full_name = ani.header['name']
+        print('{}'.format(full_name))
+        name = full_name[:full_name.rfind('_')]
+        if name not in self.animations:
+            self.animations[name] = []
+        self.animations[name].append(ani)
+    
+    def finalize(self, enable_all=False):
+        '''
+        Update in main header
+            animation count
+            enable count
+        Update in each animation header:
+            frame address
+            num bitmaps
+            num frames
+            global_id
+            enable flag (optional)
+        '''
+        ani_count = 0
+        for title in self.animations:
+            ani_count += len(self.animations[title])
+        
+        cur_offset = self.header.block_size + self.header.startup_pic_size
+        cur_offset += ani_count * RunDmdAnimation.block_size
+
+        enable_count = 1 # For some reason, the enable count is +1
+        global_id = 1
+        for title in sorted(self.animations):
+            for ani in self.animations[title]:
+                frames_binary = ani.build_binary_frames()
+                ani.header['global_id'] = global_id
+                ani.header['total_frames'] = len(ani.frames)
+                ani.header['frames_addr'] = cur_offset
+                ani.header['num_bitmaps'] = (len(frames_binary) - ani.block_size) // ani.bitmap_size
+                if enable_all == True:
+                    ani.header['flags'] += ' | Enable'
+                    enable_count += 1
+                else:
+                    if 'Enable' in ani.header['flags']:
+                        enable_count += 1
+
+                cur_offset += len(frames_binary)
+                global_id += 1
+        self.header.header['total_animations'] = ani_count
+        self.header.header['enabled_animations'] = enable_count
+        self.header.header['version'] = 'J001'
+
+    def write_full_binary(self, fname):
+        with open(fname, 'wb') as fh:
+            # Main header
+            data = self.header.build_binary_data()
+            print('writing main header of size 0x{:x}'.format(len(data)))
+            fh.write(self.header.build_binary_data())
+
+            # Animation headers
+            for title in sorted(self.animations):
+                for ani in self.animations[title]:
+                    fh.write(ani.build_binary_animation_header())
+            
+            # Animation bitmaps
+            for title in sorted(self.animations):
+                for ani in self.animations[title]:
+                    fh.write(ani.build_binary_frames())
 
     def get_header(self):
         return self.header.build_json_data()

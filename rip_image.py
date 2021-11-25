@@ -24,12 +24,13 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
 
-    rundmd = RunDmdImage.RunDmdImage()
+    rundmd = RunDmdImage.RunDmdImage(enable_all=True)
+    print('Loading and processing image')
     rundmd.load_full_binary(args.image.name)
     main_header_json = rundmd.get_header()
     output_dir = os.path.abspath(args.output_dir)
     os.chdir(output_dir)
-    print('Writing main header')
+    print('Writing header.json')
     with open ('header.json', 'w') as fh:
         fh.write(main_header_json)
 
@@ -37,7 +38,6 @@ if __name__ == '__main__':
     cur_ani_cnt = 0
     for ani in rundmd.get_animations():
         ani_name, ani_json = ani
-        print('Processing json {}'.format(ani_name))
         if prev_ani_name != ani_name:
             ani_path = os.path.join(output_dir, ani_name)
             if not os.path.isdir(ani_path):
@@ -46,7 +46,7 @@ if __name__ == '__main__':
             prev_ani_name = ani_name
             cur_ani_cnt = 0
         cur_file = '{}_{:03d}.json'.format(ani_name, cur_ani_cnt)
-        print('Processing: file {}'.format(cur_file))
+        print('Writing {}/{}'.format(ani_name, cur_file))
         with open(cur_file, 'w') as fh:
             fh.write(ani_json)
         cur_ani_cnt += 1
