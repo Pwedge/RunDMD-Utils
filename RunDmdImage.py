@@ -36,6 +36,8 @@ class BinaryHandler(object):
                         field_val = field_val_tmp[3:]
                     elif params['type'] == 'granular':
                         field_val = int(field_val * params['granular_unit'])
+                    elif params['type'] == 'function':
+                        field_val = params['decode'](field_val)
             parsed[field] = field_val
             cur_offset += width
         return parsed
@@ -63,6 +65,8 @@ class BinaryHandler(object):
                             field_val |= 1 << params['flag_bits'][flag]
                 elif params['type'] == 'granular':
                     field_val = int(field_val / params['granular_unit'])
+                elif params['type'] == 'function':
+                        field_val = params['encode'](field_val)
             if byte_vals == None:
                 byte_vals = field_val.to_bytes(width, 'big')
             binary_data += byte_vals
@@ -105,7 +109,27 @@ class RunDmdHeader(object):
     def build_json_data(self):
         return json.dumps(self.header, indent=2)
     # Main loaders and builders end
-    
+
+
+rundmd_duration_buckets = [
+        # duration granularity is encoded in the upper 2 bits of the 8 bit value
+        # encoded duration is the lower 6 bits
+        # (gran_ms, max_val)
+        # FIXME: This needs further empirical measurements to make sure that it is accurate
+        (2,     2*63),
+        (40,    40*63),
+        (150,   150*63),
+        (1000,  1000*63) # ??? just guessed 
+    ]
+def RunDmdDurationEncode(duration_ms):
+    for i, (gran, max) in enumerate(rundmd_duration_buckets):
+        if duration_ms <= max:
+            return (i << 6) | (duration_ms // gran)
+    return 15   # Just assume 30ms
+
+def RunDmdDurationDecode(duration_enc):
+    bucket = rundmd_duration_buckets[(duration_enc >> 6) & 0x3]
+    return (duration_enc & 0x3f) * bucket[0]
 
 class RunDmdAnimation(object):
     block_size =                512
@@ -114,6 +138,7 @@ class RunDmdAnimation(object):
     bitmap_size =               bitmap_width * bitmap_height // 2 # One pixel per nibble
     flags =                     {'Enable' : 0} # bit position numbers
     clock_type =                {'NoClock' : 0, 'ClockBehind' : 1, 'ClockOnTop' : 2}
+    transition =                {'Disable' : 0, 'Enable' : 1}
     clock_size =                {'ClockSmall' : 0, 'ClockLarge' : 1}
     animation_header_format = [ # list in header byte order and width is in bytes
         ('global_id',           {'width' : 2}),
@@ -124,8 +149,8 @@ class RunDmdAnimation(object):
         ('display_width',       {'width' : 1}),
         ('display_height',      {'width' : 1}),
         ('clock_type',          {'width' : 1, 'type' : 'enum', 'enum_vals' : clock_type}),
-        ('unknown_byte12',      {'width' : 1}),
-        ('unknown_byte13',      {'width' : 1}),
+        ('intro_transition',    {'width' : 1, 'type' : 'enum', 'enum_vals' : transition}),
+        ('outro_transition',    {'width' : 1, 'type' : 'enum', 'enum_vals' : transition}), # maybe?
         ('clock_size',          {'width' : 1, 'type' : 'enum', 'enum_vals' : clock_size}),
         ('clock_position_x',    {'width' : 1}),
         ('clock_position_y',    {'width' : 1}),
@@ -136,8 +161,9 @@ class RunDmdAnimation(object):
     ]
     frames_header_format = [
         ('bitmap_num',          {'width' : 1}),
-        ('duration',            {'width' : 1})
+        ('duration',            {'width' : 1, 'type' : 'function', 'encode' : RunDmdDurationEncode, 'decode' : RunDmdDurationDecode})
     ]
+
 
     def __init__(self):
         self.header = {}
@@ -157,7 +183,7 @@ class RunDmdAnimation(object):
                 print('Frame parsing failed')
                 return False
             frame += row[1:-1]
-        return frame
+        return frame  
     # Helper methods end
     
 
@@ -335,11 +361,12 @@ class RunDmdImage(object):
     def load_json_header_data(self, json_data):
         self.header.load_json_data(json_data)
     
-    def load_json_animation_data(self, json_data):
+    def load_json_animation_data(self, json_data, name=None):
         ani = RunDmdAnimation()
-        ani.load_json_data(json_data)        
+        ani.load_json_data(json_data)
+        if name != None:
+            ani.header['name'] = name        
         full_name = ani.header['name']
-        print('{}'.format(full_name))
         name = full_name[:full_name.rfind('_')]
         if name not in self.animations:
             self.animations[name] = []

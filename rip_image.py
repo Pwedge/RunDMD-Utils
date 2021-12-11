@@ -24,7 +24,7 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
 
-    rundmd = RunDmdImage.RunDmdImage(enable_all=True)
+    rundmd = RunDmdImage.RunDmdImage()
     print('Loading and processing image')
     rundmd.load_full_binary(args.image.name)
     main_header_json = rundmd.get_header()

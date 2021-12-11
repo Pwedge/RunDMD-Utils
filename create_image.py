@@ -34,6 +34,7 @@ if __name__ == '__main__':
         path = os.path.join(input_dir, d)
         if not os.path.isdir(path):
             continue
+        cnt = 1
         for f in sorted(os.listdir(path)):
             filepath = os.path.join(path, f)
             if not os.path.isfile(filepath):
@@ -43,37 +44,10 @@ if __name__ == '__main__':
             with open(filepath, 'r') as fh:
                 json_data = fh.read()
             print('Loading  {}/{}'.format(d, f))
-            rundmd.load_json_animation_data(json_data)
+            name = '{}_{:03d}'.format(d, cnt)
+            rundmd.load_json_animation_data(json_data, name=name)
+            cnt += 1
     
     rundmd.finalize()
     image_path = os.path.join(base_dir, args.image.name)
     rundmd.write_full_binary(image_path)
-
-    sys.exit(0)
-
-
-    print('Loading and processing image')
-    rundmd.load_full_binary(args.image.name)
-    main_header_json = rundmd.get_header()
-    output_dir = os.path.abspath(args.output_dir)
-    os.chdir(output_dir)
-    print('Writing header.json')
-    with open ('header.json', 'w') as fh:
-        fh.write(main_header_json)
-
-    prev_ani_name = None
-    cur_ani_cnt = 0
-    for ani in rundmd.get_animations():
-        ani_name, ani_json = ani
-        if prev_ani_name != ani_name:
-            ani_path = os.path.join(output_dir, ani_name)
-            if not os.path.isdir(ani_path):
-                os.mkdir(ani_path)
-            os.chdir(ani_path)
-            prev_ani_name = ani_name
-            cur_ani_cnt = 0
-        cur_file = '{}_{:03d}.json'.format(ani_name, cur_ani_cnt)
-        print('Writing {}/{}'.format(ani_name, cur_file))
-        with open(cur_file, 'w') as fh:
-            fh.write(ani_json)
-        cur_ani_cnt += 1
