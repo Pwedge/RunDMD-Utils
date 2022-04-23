@@ -6,7 +6,7 @@ import argparse
 import RunDmdImage
 import json
 import imageio as iio
-from PIL import Image
+from PIL import Image, ImageOps
 
 def parse_arguments():
     def dir_path(string):
@@ -24,6 +24,7 @@ def parse_arguments():
     parser.add_argument('--y-start', help='Starting Y coordinate', type=int)
     parser.add_argument('--y-end', help='Ending Y coordinate', type=int)
     parser.add_argument('--frame-skip', help='Number of frames to skip', type=int, default=0)
+    parser.add_argument('--invert', help='Invert the colors', action='store_true', default=False)
     parser.add_argument('--output-json', help='Output JSON filename', type=argparse.FileType('w'), required=True)
     return parser.parse_args()
 
@@ -63,17 +64,29 @@ if __name__ == '__main__':
     ani = RunDmdImage.RunDmdAnimation()
     ani.load_binary_animation_header(bytearray(ani.block_size))
 
-    for i, im in enumerate(reader):
+    #for i, im in enumerate(reader):
+    for i in range(len(reader)):
+        try:
+            im = reader.get_next_data()
+        except RuntimeError:
+            pass
         if i % (args.frame_skip + 1) != 0:
             continue
-        if i < args.frame_start or i > args.frame_end:
+        if args.frame_start and i < args.frame_start:
             continue
+        if args.frame_end and i > args.frame_end:
+            break
 
         original = Image.fromarray(im)
         #original.show()
 
         cropped = original.crop((left, top, right, bottom))
         #cropped.show()
+
+        if args.invert == True:
+            inverted = ImageOps.invert(cropped)
+            cropped = inverted
+            #inverted.show()
 
         resized = cropped.resize((128, 32))
         #resized.show()

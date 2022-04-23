@@ -15,14 +15,14 @@ def parse_arguments():
             raise argparse.ArgumentTypeError('Unable to read from: {}'.format(string))
 
     parser = argparse.ArgumentParser(description='Create a RunDMD binary image based on a directory with header and animation files')
-    parser.add_argument('--input_gif', help='Input GIF filename', type=argparse.FileType('r'), required=True)
-    parser.add_argument('--frame_start', help='Starting frame number', type=int)
-    parser.add_argument('--frame_end', help='Ending frame number', type=int)
-    parser.add_argument('--x_start', help='Starting X coordinate', type=int)
-    parser.add_argument('--x_end', help='Ending X coordinate', type=int)
-    parser.add_argument('--y_start', help='Starting Y coordinate', type=int)
-    parser.add_argument('--y_end', help='Ending Y coordinate', type=int)
-    parser.add_argument('--output_json', help='Output JSON filename', type=argparse.FileType('w'), required=True)
+    parser.add_argument('--input-gif', help='Input GIF filename', type=argparse.FileType('r'), required=True)
+    parser.add_argument('--frame-start', help='Starting frame number', type=int)
+    parser.add_argument('--frame-end', help='Ending frame number', type=int)
+    parser.add_argument('--x-start', help='Starting X coordinate', type=int)
+    parser.add_argument('--x-end', help='Ending X coordinate', type=int)
+    parser.add_argument('--y-start', help='Starting Y coordinate', type=int)
+    parser.add_argument('--y-end', help='Ending Y coordinate', type=int)
+    parser.add_argument('--output-json', help='Output JSON filename', type=argparse.FileType('w'), required=True)
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -89,7 +89,7 @@ if __name__ == '__main__':
     ani.header['display_width'] = 128
     ani.header['display_height'] = 32
     ani.header['num_bitmaps'] = len(ani.frames)
-    ani.header['total_frames'] = len(ani.frames)
+    ani.header['total_frames'] = len(ani)
     
     with open(args.output_json.name, 'w') as fh:
         fh.write(ani.build_json_data())

@@ -16,6 +16,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Create a RunDMD binary image based on a directory with header and animation files')
     parser.add_argument('--input-dir', help='Path to read the extracted JSON files from', type=dir_path, required=True)
     parser.add_argument('--image', help='RunDMD raw binary image name to be created', type=argparse.FileType('w'), required=True)
+    parser.add_argument('--pad-size', help='RunDMD image minimum size', type=int, default=0)
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -50,4 +51,4 @@ if __name__ == '__main__':
     
     rundmd.finalize()
     image_path = os.path.join(base_dir, args.image.name)
-    rundmd.write_full_binary(image_path)
+    rundmd.write_full_binary(image_path, args.pad_size)

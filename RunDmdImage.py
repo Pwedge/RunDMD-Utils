@@ -139,7 +139,7 @@ class RunDmdAnimation(object):
     flags =                     {'Enable' : 0} # bit position numbers
     clock_type =                {'NoClock' : 0, 'ClockBehind' : 1, 'ClockOnTop' : 2}
     transition =                {'Disable' : 0, 'Enable' : 1}
-    clock_size =                {'ClockSmall' : 0, 'ClockLarge' : 1}
+    clock_size =                {'ClockLarge' : 0, 'ClockSmall' : 1}
     animation_header_format = [ # list in header byte order and width is in bytes
         ('global_id',           {'width' : 2}),
         ('flags',               {'width' : 1, 'type' : 'flags', 'flag_bits' : flags}),
@@ -318,6 +318,8 @@ class RunDmdAnimation(object):
 
 
 class RunDmdImage(object):
+    ani_header_to_frame_data_padding = 51200
+
     def __init__(self):
         self.header = RunDmdHeader()
         self.animations = {}
@@ -390,6 +392,7 @@ class RunDmdImage(object):
         
         cur_offset = self.header.block_size + self.header.startup_pic_size
         cur_offset += ani_count * RunDmdAnimation.block_size
+        cur_offset += self.ani_header_to_frame_data_padding
 
         enable_count = 1 # For some reason, the enable count is +1
         global_id = 1
@@ -413,7 +416,7 @@ class RunDmdImage(object):
         self.header.header['enabled_animations'] = enable_count
         self.header.header['version'] = 'J001'
 
-    def write_full_binary(self, fname):
+    def write_full_binary(self, fname, min_size=0):
         with open(fname, 'wb') as fh:
             # Main header
             data = self.header.build_binary_data()
@@ -424,11 +427,19 @@ class RunDmdImage(object):
             for title in sorted(self.animations):
                 for ani in self.animations[title]:
                     fh.write(ani.build_binary_animation_header())
+
+            # Padding
+            fh.write(bytearray(self.ani_header_to_frame_data_padding))
             
             # Animation bitmaps
             for title in sorted(self.animations):
                 for ani in self.animations[title]:
                     fh.write(ani.build_binary_frames())
+
+            # Padding
+            cur_size = fh.tell()
+            if cur_size < min_size:
+                fh.write(bytearray(min_size - cur_size))
 
     def get_header(self):
         return self.header.build_json_data()
