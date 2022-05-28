@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 
+'''
+NOTES:
+This is all based on looking at a binary image (B134) and trying to figure out the basic binary format. Once that was determined, then various fields were modified and the image was tested on actual hardware to see what changed
+
+It appears that the last animation frame may be missed (bug in the RunDMD firmware?).  For example, see the "WORLD_CUP_SOCCER_028" animation in the B134 image.  The animation header is:
+    00105000: 07c501280002944e33802002010101240b282800574f524c445f4355505f534f434345525f303238000000000000000000000000000000000000000000000000
+This shows that there are 40 bitmaps, 51 frames, the clock should start on bitmap 40 and end on bitmap 40, and that the bitmap to frame info is at 0x0002944e * d'512 = 0x5289c00.  The frame header is:
+    05289c00: 01730232033201690432053206320732083209320a320b320c320d320e320f3210321132123213321432153216321732183219321a321b321c321d321b321c32
+    05289c40: 1d321b321c321d321b321c321d321e321f3220692132226923322432253226322769288727670000000000000000000000000000000000000000000000000000
+The frame header clearly has 51 (bitmap, duration) tuples.  Tuple 50 references bitmap 40, so the clock should be displayed.  Tuple 51 references bitmap 39.  Based on this, the expectation is that the clock would quickly show for one frame and then disapear.  When looking at this animation on hardware, though, the clock gets displayed and then never disapears.
+
+Most of the binary image appears to use 1-based numbers for things like bitmap counts and bitmap numbers. This library normalizes everything using 0-based numbering
+'''
+
 from struct import pack, unpack
 from enum import Enum
 import sys
 import os
+import logging
 import json
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 class BinaryHandler(object):
     def __init__(self):
@@ -112,13 +130,13 @@ class RunDmdHeader(object):
 
 
 rundmd_duration_buckets = [
+        # FIXME: This was based on empircal measurements.  Watching in editor shows that something is still not understood here
         # duration granularity is encoded in the upper 2 bits of the 8 bit value
         # encoded duration is the lower 6 bits
         # (gran_ms, max_val)
-        # FIXME: This needs further empirical measurements to make sure that it is accurate
         (2,     2*63),
-        (40,    40*63),
-        (150,   150*63),
+        (10,    10*63),
+        (100,   100*63),
         (1000,  1000*63) # ??? just guessed 
     ]
 def RunDmdDurationEncode(duration_ms):
@@ -150,12 +168,12 @@ class RunDmdAnimation(object):
         ('display_height',      {'width' : 1}),
         ('clock_type',          {'width' : 1, 'type' : 'enum', 'enum_vals' : clock_type}),
         ('intro_transition',    {'width' : 1, 'type' : 'enum', 'enum_vals' : transition}),
-        ('outro_transition',    {'width' : 1, 'type' : 'enum', 'enum_vals' : transition}), # maybe?
+        ('outro_transition',    {'width' : 1, 'type' : 'enum', 'enum_vals' : transition}),
         ('clock_size',          {'width' : 1, 'type' : 'enum', 'enum_vals' : clock_size}),
         ('clock_position_x',    {'width' : 1}),
         ('clock_position_y',    {'width' : 1}),
-        ('clock_start_frame',   {'width' : 1}),
-        ('clock_end_frame',     {'width' : 1}),
+        ('clock_start_frame',   {'width' : 1}), # In the binary header this is the 1-based bitmap number, not the frame number
+        ('clock_end_frame',     {'width' : 1}), # In the binary header this is the 1-based bitmap number, not the frame number
         ('unknown_byte19',      {'width' : 1}),
         ('name',                {'width' : 32, 'type' : 'string'})
     ]
@@ -168,6 +186,8 @@ class RunDmdAnimation(object):
     def __init__(self):
         self.header = {}
         self.frames = []
+        self.frame_to_bitmap = {}
+        self.bitmap_to_frames = {}
     
     # Helper methods start
     def _frame_to_rows(self, frame_data):
@@ -180,7 +200,7 @@ class RunDmdAnimation(object):
         frame = ''
         for row in frame_rows:
             if row[0] != '|' or row[-1:] != '|':
-                print('Frame parsing failed')
+                logger.error('Frame parsing failed')
                 return False
             frame += row[1:-1]
         return frame  
@@ -192,8 +212,18 @@ class RunDmdAnimation(object):
         self.header = BinaryHandler().parse_binary(self.animation_header_format, data)
 
     def load_json_animation_header(self, json_data):
+        dummy_header = bytearray(52)
+        self.load_binary_animation_header(dummy_header)
         data = json.loads(json_data)
+        self.header['flags'] = 'Enable'
+        self.header['total_frames'] = len(self.frames)
+        self.header['display_width'] = 128
+        self.header['display_height'] = 32
         self.header.update(data)
+        if self.header['clock_start_frame'] < 0:
+            self.header['clock_start_frame'] = 0
+        if self.header['clock_end_frame'] >= self.header['total_frames']:
+            self.header['clock_end_frame'] = self.header['total_frames'] - 1
     
     def build_binary_animation_header(self):
         binary_data = BinaryHandler().create_binary(self.animation_header_format, self.header)
@@ -202,20 +232,79 @@ class RunDmdAnimation(object):
     
     def build_json_animation_header(self):
         return json.dumps(self.header, indent=2)
+
+    def animation_header_user_format(self):
+        logger.debug('Sanitizing header for user consumption')
+        logger.debug('Original header was: {}'.format(self.header))
+        
+        start_bitmap = self.header['clock_start_frame'] - 1
+        if start_bitmap == -1:
+            logger.info('Converting clock start to first frame number')
+            self.header['clock_start_frame'] = 0
+        elif start_bitmap not in self.bitmap_to_frames:
+            logger.warning('Header requested start bitmap {} (0-based), but this was never referenced. Forcing no clock'.format(start_bitmap))
+            self.header['clock_start_frame'] = 0
+            self.header['clock_type'] = 'NoClock'
+        else:
+            logger.debug('Start bitmap is sane.  Converting from {} to {} (both 0-based)'.format(start_bitmap, self.bitmap_to_frames[start_bitmap][0]))
+            self.header['clock_start_frame'] = self.bitmap_to_frames[start_bitmap][0]
+        
+        end_bitmap = self.header['clock_end_frame'] - 1
+        if end_bitmap == -1:
+            logger.info('Converting clock end to last frame number')
+            self.header['clock_end_frame'] = len(self.frames) - 1
+        elif end_bitmap not in self.bitmap_to_frames:
+            logger.warning('Header requested end bitmap {} (0-based), but this was never referenced. Forcing display until end'.format(end_bitmap))
+            self.header['clock_end_frame'] = len(self.frames) - 1
+        else:
+            logger.debug('End bitmap is sane.  Converting from {} to {}'.format(end_bitmap, self.bitmap_to_frames[end_bitmap][0]))
+            self.header['clock_end_frame'] = self.bitmap_to_frames[end_bitmap][0]
+        
+        user_keys = ['clock_type', 'intro_transition', 'outro_transition', 'clock_size', 'clock_position_x', 'clock_position_y', 'clock_start_frame', 'clock_end_frame']
+        for key in list(self.header):
+            if key not in user_keys:
+                self.header.pop(key)
+
+    def animation_header_system_format(self):
+        params = ['clock_start_frame', 'clock_end_frame']
+        for param in params:
+            self.header[param] = self.frame_to_bitmap[self.header[param]] + 1
     # Animation header handling end
     
     
     # Frame handling start
     def load_binary_frames(self, data):
-        for i in range(self.header['total_frames']):
-            frame_to_bitmap_info = BinaryHandler().parse_binary(self.frames_header_format, data[i*2:i*2+2])
-            bitmap_addr = (frame_to_bitmap_info['bitmap_num'] - 1) * self.bitmap_size + self.block_size
+        referenced_bitmaps = {}
+        for frame_num in range(self.header['total_frames']):
+            frame_to_bitmap_info = BinaryHandler().parse_binary(self.frames_header_format, data[frame_num*2:frame_num*2+2])
+            bitmap_num = frame_to_bitmap_info['bitmap_num'] - 1
+            referenced_bitmaps[frame_to_bitmap_info['bitmap_num']] = 1
+            self.frame_to_bitmap[frame_num] = bitmap_num
+            if bitmap_num not in self.bitmap_to_frames:
+                self.bitmap_to_frames[bitmap_num] = [frame_num]
+            else:
+                self.bitmap_to_frames[bitmap_num].append(frame_num)
+            bitmap_addr = bitmap_num * self.bitmap_size + self.block_size
             frame_rows_list = self._frame_to_rows(data[bitmap_addr:bitmap_addr+self.bitmap_size].hex())
             self.frames.append({'duration' : frame_to_bitmap_info['duration'], 'bitmap' : frame_rows_list})
+        #print('{}'.format(sorted(referenced_bitmaps)))
+        for i in range(1, self.header['num_bitmaps'] + 1):
+            if i not in referenced_bitmaps:
+                print('WARNING: Bitmap number {} is unreferenced in {}'.format(i, self.header['name']))
     
     def load_json_frames(self, json_data):
         data = json.loads(json_data)
         self.frames = data
+        for i, frame in enumerate(self.frames):
+            if 'duration' not in frame:
+                logger.error('Frame {} does not contain a duration key'.format(i))
+            if len(frame['bitmap']) != self.bitmap_height:
+                logger.error('Frame {} is not the correct height'.format(i))
+            for j, row in enumerate(frame['bitmap']):
+                if row[0] != '|' and row[-1] != '|':
+                    logger.error('Row {} of frame {} does not have expected starting and ending markers'.format(j, i))
+                if len(row) != self.bitmap_width + 2:
+                    logger.error('Row {} of frame {} is not the correct width'.format(j, i))
     
     def build_binary_frames(self):
         known_bitmaps = {}
@@ -228,6 +317,11 @@ class RunDmdAnimation(object):
                 known_bitmaps[bitmap] = len(known_bitmaps) + 1
                 bitmap_binary = bytearray.fromhex(bitmap)
                 animation_binary += bitmap_binary
+            self.frame_to_bitmap[i] = known_bitmaps[bitmap]
+            if known_bitmaps[bitmap] not in self.bitmap_to_frames:
+                self.bitmap_to_frames[known_bitmaps[bitmap]] = [i]
+            else:
+                self.bitmap_to_frames[known_bitmaps[bitmap]].append(i)
             tmp_info = BinaryHandler().create_binary(self.frames_header_format, {'duration' : frame_info['duration'], 'bitmap_num' : known_bitmaps[bitmap]})
             animation_binary[i*2:i*2+2] = tmp_info
         return animation_binary
@@ -244,18 +338,22 @@ class RunDmdAnimation(object):
     
     def load_json_data(self, json_data):
         data = json.loads(json_data)
-        self.load_json_animation_header(json.dumps(data['header']))
         self.load_json_frames(json.dumps(data['frames']))
+        self.load_json_animation_header(json.dumps(data['header']))
 
-    def build_binary_data(self):
+    def build_binary_data(self, debug=False):
+        if debug == False:
+            self.animation_header_system_format()
         header = self.build_binary_header()
         frames = self.build_binary_frames()
         return (header, frames)
     
-    def build_json_data(self):
+    def build_json_data(self, debug=False):
+        if debug == False:
+            self.animation_header_user_format()
         formatted_frames = []
-        for frame in self.frames:
-            formatted_frames.append({'duration' : frame['duration'], 'bitmap' : frame['bitmap']})
+        for i, frame in enumerate(self.frames):
+            formatted_frames.append({'frame_num' : i, 'duration' : frame['duration'], 'bitmap' : frame['bitmap']})
         out = {'header' : self.header, 'frames' : formatted_frames}
         return json.dumps(out, indent=2)
     # Main loaders and builders end
@@ -448,3 +546,4 @@ class RunDmdImage(object):
         for key in sorted(self.animations):
             for ani in self.animations[key]:
                 yield (key, ani.build_json_data())
+
