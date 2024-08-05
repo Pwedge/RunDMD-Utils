@@ -9,7 +9,7 @@ It appears that the last animation frame may be missed (bug in the RunDMD firmwa
 This shows that there are 40 bitmaps, 51 frames, the clock should start on bitmap 40 and end on bitmap 40, and that the bitmap to frame info is at 0x0002944e * d'512 = 0x5289c00.  The frame header is:
     05289c00: 01730232033201690432053206320732083209320a320b320c320d320e320f3210321132123213321432153216321732183219321a321b321c321d321b321c32
     05289c40: 1d321b321c321d321b321c321d321e321f3220692132226923322432253226322769288727670000000000000000000000000000000000000000000000000000
-The frame header clearly has 51 (bitmap, duration) tuples.  Tuple 50 references bitmap 40, so the clock should be displayed.  Tuple 51 references bitmap 39.  Based on this, the expectation is that the clock would quickly show for one frame and then disapear.  When looking at this animation on hardware, though, the clock gets displayed and then never disapears.
+The frame header clearly has 51 (bitmap, duration) tuples.  Tuple 50 references bitmap 40, so the clock should be displayed.  Tuple 51 references bitmap 39.  Based on this, the expectation is that the clock would quickly show for one frame and then disapear.  When looking at this animation on hardware, though, the clock gets displayed and then never disappears.
 
 Most of the binary image appears to use 1-based numbers for things like bitmap counts and bitmap numbers. This library normalizes everything using 0-based numbering
 '''
@@ -113,7 +113,7 @@ class RunDmdHeader(object):
     def load_binary_data(self, data):
         self.header = BinaryHandler().parse_binary(self.main_header_format, data)
         if self.header['marker'] != self.image_marker:
-            print('Binary did not have the correct marker')
+            logger.fatal('Binary did not have the correct marker')
             return False
 
     def load_json_data(self, json_data):
@@ -284,13 +284,24 @@ class RunDmdAnimation(object):
                 self.bitmap_to_frames[bitmap_num] = [frame_num]
             else:
                 self.bitmap_to_frames[bitmap_num].append(frame_num)
-            bitmap_addr = bitmap_num * self.bitmap_size + self.block_size
-            frame_rows_list = self._frame_to_rows(data[bitmap_addr:bitmap_addr+self.bitmap_size].hex())
+            if bitmap_num < 0:
+                # Pure transparency frames seem to be indicated by a zero (one-based) frame number
+                hex_str = 'a' * self.bitmap_size * 2
+            else:
+                bitmap_addr = bitmap_num * self.bitmap_size + self.block_size
+                #logger.debug('Calling _frame_to_rows method for frame_num {}'.format(frame_num))
+                #logger.debug('Using data:')
+                hex_str = data[bitmap_addr:bitmap_addr+self.bitmap_size].hex()
+            #for i in range(32):
+                #logger.debug('  {}'.format(hex_str[i*128:i*128+128]))
+            frame_rows_list = self._frame_to_rows(hex_str)
             self.frames.append({'duration' : frame_to_bitmap_info['duration'], 'bitmap' : frame_rows_list})
-        #print('{}'.format(sorted(referenced_bitmaps)))
+        #logger.debug('{}'.format(sorted(referenced_bitmaps)))
         for i in range(1, self.header['num_bitmaps'] + 1):
             if i not in referenced_bitmaps:
-                print('WARNING: Bitmap number {} is unreferenced in {}'.format(i, self.header['name']))
+                logger.warn('Bitmap number {} is unreferenced in {}'.format(i, self.header['name']))
+                return False
+        return True
     
     def load_json_frames(self, json_data):
         data = json.loads(json_data)
@@ -361,19 +372,19 @@ class RunDmdAnimation(object):
 
     # Debug methods start
     def debug_dump(self):
-        print('Here is the header:')
+        logger.debug('Here is the header:')
         for key in sorted(self.header):
-            print('  {}: {}'.format(key, self.header[key]))
-        print('')
-        print('Here are the frames:')
+            logger.debug('  {}: {}'.format(key, self.header[key]))
+        logger.debug('')
+        logger.debug('Here are the frames:')
         for frame in self.frames:
             for key in sorted(frame):
                 if key == 'bitmap':
-                    print('  {}:'.format(key))
+                    logger.debug('  {}:'.format(key))
                     for row in frame['bitmap']:
-                        print('    {}'.format(row))
+                        logger.debug('    {}'.format(row))
                 else:
-                    print('  {}: {}'.format(key, frame[key]))
+                    logger.debug('  {}: {}'.format(key, frame[key]))
     
     def sanity_check_animation_header(self, binary_data):
         # binary -> dic -> json -> dic -> binary
@@ -384,14 +395,14 @@ class RunDmdAnimation(object):
         self.load_json_animation_header(json_str)
         new_dic = self.header.copy()
         if new_dic != orig_dic:
-            print('After JSON load, the header data no longer matches')
+            logger.debug('After JSON load, the header data no longer matches')
             sys.exit(1)
         
         new_binary_data = self.build_binary_animation_header()
         if new_binary_data != binary_data:
-            print('After binary dump, the header data no longer matches')
-            print('{}'.format(binary_data.hex()))
-            print('{}'.format(new_binary_data.hex()))
+            logger.debug('After binary dump, the header data no longer matches')
+            logger.debug('{}'.format(binary_data.hex()))
+            logger.debug('{}'.format(new_binary_data.hex()))
             sys.exit(1)
     
     def sanity_check_frames(self, binary_data):
@@ -403,26 +414,73 @@ class RunDmdAnimation(object):
         self.load_json_frames(json_str)
         new_lst = self.frames.copy()
         if new_lst != orig_lst:
-            print('After JSON load, the frame data no longer matches')
+            logger.debug('After JSON load, the frame data no longer matches')
             sys.exit(1)
         
         new_binary_data = self.build_binary_frames()
         if new_binary_data != binary_data:
-            print('After binary dump, the frame data no longer matches')
-            #print('{}'.format(binary_data.hex()[0:50]))
-            #print('{}'.format(new_binary_data.hex()[0:50]))
+            logger.debug('After binary dump, the frame data no longer matches')
+            #logger.debug('{}'.format(binary_data.hex()[0:50]))
+            #logger.debug('{}'.format(new_binary_data.hex()[0:50]))
             #sys.exit(1)
     # Debug methods end
 
 
 class RunDmdImage(object):
+    known_image_issues = {
+        'B134' : [
+            'ATTACK_FROM_MARS_033', # Bitmap 16 and 17 are identical, header only references bitmap 16
+            'BIG_BANG_BAR_026', # Image problem?  0x00953000: 01320232033204320532066e0732083209320a320b320c32066e0e320f3210321132123213321432153216321732186919321a321b321c321d321e321f322032, 0x953018 should be 0x0d
+            'BLACK_ROSE_020', # Bitmap 2 and 3 are identical, header only references bitmap 2
+            'BRAM_STOKERS_DRACULA_023', # Bitmap 4 and 5 are identical, header only references bitmap 5
+            'CACTUS_CANYON_008', # Bitmap 3 and 4 are identical, header only references bitmap 4
+            'CACTUS_CANYON_020', # Bitmap 12 and 13 are identical, header only references bitmap 12
+            'CACTUS_CANYON_039', # Bitmap 12 and 13 are identical, header only references bitmap 12
+            'CIRQUS_VOLTAIRE_025', # Purposely removed?  Bitmap 1 has the clown facing partially sideways
+            'CONGO_029', # Purposely removed?  Bitmap 1 looks out of place compared to {2, 3, 4, ...}
+            'CORVETTE_009', # Image problem?  Bitmap 21 could have been included in the animation
+            'CREATURE_FROM_THE_BLACK_L_014', # Image problem?  Bitmap 18 could have been included in the animation
+            'CREATURE_FROM_THE_BLACK_L_016', # Image problem?  Bitmap 21 could have been included in the animation
+            'FISH_TALES_016', # Purposely removed?  Bitmap 4 looks out of place compared to {1, 2, 3}
+            'FISH_TALES_035', # Bitmap 16 and 17 are identical, header only references bitmap 16
+            'GHOSTBUSTERS_049', # Image problem?  Bitmap 2 could have been included in the animation
+            'HURRICANE_022', # Bitmap 10 and 11 are identical, header only references bitmap 10
+            'INDIANA_JONES_023', # Appears to be old data.  This is the mine cart succseeding scene, but bitmap 48 is crashing
+            'INDIANA_JONES_024', # Image problem?  Bitmap 15 could have been included in the animation
+            'JUDGE_DREDD_010', # Bitmap 5 and 6 are identical, header only references bitmap 5
+            'JUDGE_DREDD_021', # Purposely removed?  Bitmap 44 looks out of place compared to the final animation bitmaps
+            'JUDGE_DREDD_033', # Image problem?  Bitmap 7 could have been included in the animation
+            'JUDGE_DREDD_047', # Bitmap 5 and 6 are identical, header only references bitmap 5
+            'METALLICA_009', # Bitmap 18 and 19 are identical, header only references bitmap 19
+            'MONSTER_BASH_042', # Image problem?  Bitmap 61 could have been included in the animation
+            'MUSTANG_022', # Purposely removed?  Bitmap 19 is mostly transparency
+            'NO_GOOD_GOFERS_009', # Purposely removed?  Bitmap 5 looks out of place compared to {1, 2, 3, 4}
+            'NO_GOOD_GOFERS_050', # Image problem?  Bitmap 7 could have been included in the animation
+            'PIRATES_OF_THE_CARIBBEAN_034', # Image problem?  Bitmap 20 could have been included in the animation
+            'STAR_TREK_020', # Purposely removed?  Bitmap 37 looks out of place compared to rest of animation
+            'STAR_TREK_THE_NEXT_GEN_017', # Image problem?  Bitmap 5 could have been included in the animation
+            'THE_CHAMPION_PUB_007', # Bitmap 12 and 13 are identical, header only references bitmap 12
+            'THE_CHAMPION_PUB_010', # Image problem?  Bitmap 1 could have been included in the animation
+            'THE_CHAMPION_PUB_025', # Image problem?  Bitmap 6 could have been included in the animation
+            'THE_CHAMPION_PUB_046', # Image problem?  Bitmap 3 could have been included in the animation
+            'THE_CHAMPION_PUB_064', # Bitmap 60 and 61 are identical, header only references bitmap 60
+            'THE_SHADOW_037', # Image problem?  Bitmap 9 could have been included in the animation
+            'THE_WALKING_DEAD_013', # Purposely removed?  Bitmap 75 looks out of place compared to the final animation bitmaps
+            'WHO_DUNNIT_012', # Purposely removed?  Bitmap 7 is axe being pulled back
+            'WHO_DUNNIT_018', # Image problem?  Bitmap 11 could have been included in the animation
+            'WORLD_CUP_SOCCER_017', # Bitmap 5 and 6 are identical, header only references bitmap 5
+            'WORLD_CUP_SOCCER_033', # Bitmap 52 and 53 are identical, header only references bitmap 52
+            'X-MEN_054', # Image problem?  Bitmap 33 could have been included in the animation
+        ]
+    }
+    
     ani_header_to_frame_data_padding = 51200
-
+    
     def __init__(self):
         self.header = RunDmdHeader()
         self.animations = {}
         return
-
+    
     def load_full_binary(self, fname):
         offset = 0
         with open(fname, 'rb') as fh:
@@ -432,25 +490,63 @@ class RunDmdImage(object):
             data = fh.read(segment_size)
             self.header.load_binary_data(data)
             offset += segment_size
-
+            
             # Animations
             for i in range(self.header.header['total_animations']):
                 ani = RunDmdAnimation()
-
+                
                 # Animation header
                 header_segment_size = ani.block_size
                 fh.seek(offset)
                 header_data = fh.read(header_segment_size)
                 ani.load_binary_animation_header(header_data)
                 offset += header_segment_size
-
+                
+                #if ani.header['name'] == 'AC#DC_012':
+                #    sys.exit(1)
+                
                 # Animation frames
                 frames_offset = ani.header['frames_addr']
                 frames_segment_size = ani.header['num_bitmaps'] * ani.bitmap_size + ani.block_size
                 fh.seek(frames_offset)
                 frame_data = fh.read(frames_segment_size)
-                ani.load_binary_frames(frame_data)
-
+                if ani.load_binary_frames(frame_data) != True and ani.header['name'] not in self.known_image_issues[self.header.header['version']]:
+                #if ani.load_binary_frames(frame_data) !=True or ani.header['name'] == 'AC#DC_011':
+                    logger.error('Load unsuccessful')
+                    
+                    logger.debug('Raw header data: ')
+                    data_bytes = header_data
+                    row_bytes = 64
+                    img_addr = offset - header_segment_size
+                    for j in range(0, len(data_bytes), row_bytes):
+                        hex_data = data_bytes[j:j+row_bytes].hex()
+                        logger.debug('  0x{:08x}: {}'.format(img_addr + j, hex_data))
+                    
+                    logger.debug('Raw frame indirection data: ')
+                    data_bytes = frame_data[:ani.block_size]
+                    row_bytes = 64
+                    img_addr = frames_offset
+                    for j in range(0, len(data_bytes), row_bytes):
+                        hex_data = data_bytes[j:j+row_bytes].hex()
+                        logger.debug('  0x{:08x}: {}'.format(img_addr + j, hex_data))
+                    
+                    logger.debug('Raw frames data: ')
+                    data_bytes = frame_data[ani.block_size:]
+                    row_bytes = 64
+                    img_addr = frames_offset + ani.block_size
+                    bitmap_num = 0
+                    for j in range(0, len(data_bytes), row_bytes):
+                        if ((j // row_bytes) % 32) == 0:
+                            frame_hash = hash(data_bytes[bitmap_num * 0x800 : bitmap_num * 0x800 + 0x800]) & 0xffffffff
+                            logger.debug('  Bitmap {} (0x{:08x})'.format(bitmap_num + 1, frame_hash))
+                            bitmap_num += 1
+                        hex_data = data_bytes[j:j+row_bytes].hex()
+                        logger.debug('  0x{:08x}: {}'.format(img_addr + j, hex_data))
+                        if ((j // row_bytes) % 32) + 1 == 32:
+                            logger.debug('  ')
+                    
+                    sys.exit(1)
+                
                 # Add it
                 full_name = ani.header['name']
                 name = full_name[:full_name.rfind('_')]
@@ -491,7 +587,7 @@ class RunDmdImage(object):
         cur_offset = self.header.block_size + self.header.startup_pic_size
         cur_offset += ani_count * RunDmdAnimation.block_size
         cur_offset += self.ani_header_to_frame_data_padding
-
+        
         enable_count = 1 # For some reason, the enable count is +1
         global_id = 1
         for title in sorted(self.animations):
@@ -507,25 +603,25 @@ class RunDmdImage(object):
                 else:
                     if 'Enable' in ani.header['flags']:
                         enable_count += 1
-
+                
                 cur_offset += len(frames_binary)
                 global_id += 1
         self.header.header['total_animations'] = ani_count
         self.header.header['enabled_animations'] = enable_count
-        self.header.header['version'] = 'J001'
-
+        self.header.header['version'] = 'X001'
+    
     def write_full_binary(self, fname, min_size=0):
         with open(fname, 'wb') as fh:
             # Main header
             data = self.header.build_binary_data()
-            print('writing main header of size 0x{:x}'.format(len(data)))
+            logger.info('writing main header of size 0x{:x}'.format(len(data)))
             fh.write(self.header.build_binary_data())
-
+            
             # Animation headers
             for title in sorted(self.animations):
                 for ani in self.animations[title]:
                     fh.write(ani.build_binary_animation_header())
-
+            
             # Padding
             fh.write(bytearray(self.ani_header_to_frame_data_padding))
             
@@ -533,12 +629,12 @@ class RunDmdImage(object):
             for title in sorted(self.animations):
                 for ani in self.animations[title]:
                     fh.write(ani.build_binary_frames())
-
+            
             # Padding
             cur_size = fh.tell()
             if cur_size < min_size:
                 fh.write(bytearray(min_size - cur_size))
-
+    
     def get_header(self):
         return self.header.build_json_data()
     
