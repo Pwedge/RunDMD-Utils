@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<!-- Used https://codepen.io/seipy/pen/ZEYzBQz as the baseline -->
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <!-- Ensures proper rendering and touch zooming -->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Forces IE 8/9/10 to use its latest rendering engine -->
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <title>RunDMD Animation Editor</title>
+    <link rel="stylesheet" href="css/styles.css">
+  </head>
+  <body>
+    <div class="row">
+      <div class="column">
+        <div class="inputs">
+          <h4>Animation File Options</h4>
+          <input type="file" id="file-button">
+          <input type="button" value="Save" id="save-button">
+          <input type="button" value="Play" id="play-button">
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="column">
+        <div class="inputs">
+          <h4>Animation Header Options</h4>
+          <label for="intro-transition">Intro transition</label>
+          <select id="intro-transition" name="intro-transition">
+            <option value="Disable">Disabled</option>
+            <option value="Enable">Enabled</option>
+          </select>
+          <label for="outro-transition">Outro transition</label>
+          <select id="outro-transition" name="outro-transition">
+            <option value="Disable">Disabled</option>
+            <option value="Enable">Enabled</option>
+          </select>
+          <label for="clock-type">Clock Type</label>
+          <select id="clock-type" name="clock-type">
+            <option value="NoClock">No Clock</option>
+            <option value="ClockBehind">Clock Underlay</option>
+            <option value="ClockOnTop">Clock Overlay</option>
+          </select>
+          <label for="clock-size">Clock Size</label>
+          <select id="clock-size" name="clock-size">
+            <option value="ClockSmall">Small</option>
+            <option value="ClockLarge">Large</option>
+          </select>
+          <label for="clock-start">Clock Start Frame</label>
+          <input type="number" id="clock-start-frame" name="clock-start" min="1" value="1">
+          <label for="clock-end">Clock End Frame</label>
+          <input type="number" id="clock-end-frame" name="clock-end" min="1" value="1">
+          <label for="clock-start">Clock X Position</label>
+          <input type="number" id="clock-position-x" name="clock-x" min="0" max="128" value="0">
+          <label for="clock-end">Clock Y Position</label>
+          <input type="number" id="clock-position-y" name="clock-y" min="0" max="32" value="0">
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="column">
+        <div class="inputs">
+          <h4>Animation Frame Options</h4>
+          <div class="left">
+              <label for="frame-number">Frame Number</label>
+              <input type="number" id="frame-number" name="frame-number" min="1" value="1">
+              <label for="frame-duration">Frame Duration (ms)</label>
+              <input type="number" id="frame-duration" name="frame-duration" min="10" value="10">
+          </div>
+          <div class="right">
+            <img src="img/arrow-right-to-bracket-solid.svg" id="drop-frame-back" class="draw-img mirror">
+            <img src="img/arrow-right-to-bracket-solid.svg" id="drop-frame-forward" class="draw-img">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="column">
+        <div class="inputs">
+          <h4>Animation Frame Editor</h4>
+          <div class="left">
+              <input type="radio" name="draw-mode" class="draw-mode" id="pencil-mode" value="pencil-mode" checked>
+              <label for="pencil-mode"><img src="img/pencil-solid.svg" class="draw-img"></label>
+              <input type="radio" name="draw-mode" class="draw-mode" id="fill-mode" value="fill-mode">
+              <label for="fill-mode"><img src="img/fill-solid.svg" class="draw-img"></label>
+              <input type="radio" name="draw-mode" class="draw-mode" id="border-mode" value="border-mode">
+              <label for="border-mode"><img src="img/border-all-solid.svg" class="draw-img"></label>
+          </div>
+          <div class="right">
+            <img src="img/rotate-left-solid.svg" id="history-undo" class="draw-img">
+            <img src="img/rotate-right-solid.svg" id="history-redo" class="draw-img">
+          </div>
+          <table>
+            <tbody>
+              <tr class="color-choices">
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+                <td class="color-choice"></td>
+              </tr>
+            </tbody>
+          </table>
+          </p>
+          <div class="row">
+            <div class="column">
+              <table id="pixel-canvas"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="js/editor.js"></script>
+  </body>
+</html>
