@@ -471,6 +471,51 @@ class RunDmdImage(object):
             'WORLD_CUP_SOCCER_017', # Bitmap 5 and 6 are identical, header only references bitmap 5
             'WORLD_CUP_SOCCER_033', # Bitmap 52 and 53 are identical, header only references bitmap 52
             'X-MEN_054', # Image problem?  Bitmap 33 could have been included in the animation
+        ],
+        'B237' : [
+            'ATTACK_FROM_MARS_033', # Bitmap 16 and 17 are identical, header only references bitmap 16
+            'BIG_BANG_BAR_026', # Image problem?  0x00953000: 01320232033204320532066e0732083209320a320b320c32066e0e320f3210321132123213321432153216321732186919321a321b321c321d321e321f322032, 0x953018 should be 0x0d
+            'BLACK_ROSE_020', # Bitmap 2 and 3 are identical, header only references bitmap 2
+            'BRAM_STOKERS_DRACULA_023', # Bitmap 4 and 5 are identical, header only references bitmap 5
+            'CACTUS_CANYON_008', # Bitmap 3 and 4 are identical, header only references bitmap 4
+            'CACTUS_CANYON_020', # Bitmap 12 and 13 are identical, header only references bitmap 12
+            'CACTUS_CANYON_039', # Bitmap 12 and 13 are identical, header only references bitmap 12
+            'CIRQUS_VOLTAIRE_025', # Purposely removed?  Bitmap 1 has the clown facing partially sideways
+            'CONGO_029', # Purposely removed?  Bitmap 1 looks out of place compared to {2, 3, 4, ...}
+            'CORVETTE_009', # Image problem?  Bitmap 21 could have been included in the animation
+            'CREATURE_FROM_THE_BLACK_L_014', # Image problem?  Bitmap 18 could have been included in the animation
+            'CREATURE_FROM_THE_BLACK_L_016', # Image problem?  Bitmap 21 could have been included in the animation
+            'FISH_TALES_016', # Purposely removed?  Bitmap 4 looks out of place compared to {1, 2, 3}
+            'FISH_TALES_035', # Bitmap 16 and 17 are identical, header only references bitmap 16
+            'GHOSTBUSTERS_049', # Image problem?  Bitmap 2 could have been included in the animation
+            'HURRICANE_022', # Bitmap 10 and 11 are identical, header only references bitmap 10
+            'INDIANA_JONES_023', # Appears to be old data.  This is the mine cart succseeding scene, but bitmap 48 is crashing
+            'INDIANA_JONES_024', # Image problem?  Bitmap 15 could have been included in the animation
+            'JUDGE_DREDD_010', # Bitmap 5 and 6 are identical, header only references bitmap 5
+            'JUDGE_DREDD_021', # Purposely removed?  Bitmap 44 looks out of place compared to the final animation bitmaps
+            'JUDGE_DREDD_033', # Image problem?  Bitmap 7 could have been included in the animation
+            'JUDGE_DREDD_047', # Bitmap 5 and 6 are identical, header only references bitmap 5
+            'LAST_ACTION_HERO_043', # Bitmap 1 and 19 are the same, with the exception that 19 has been edited to add transparency.  Looks like the header was changed to always use bitmap 19
+            'METALLICA_009', # Bitmap 18 and 19 are identical, header only references bitmap 19
+            'MONSTER_BASH_042', # Image problem?  Bitmap 61 could have been included in the animation
+            'MUSTANG_022', # Purposely removed?  Bitmap 19 is mostly transparency
+            'NO_GOOD_GOFERS_009', # Purposely removed?  Bitmap 5 looks out of place compared to {1, 2, 3, 4}
+            'NO_GOOD_GOFERS_050', # Image problem?  Bitmap 7 could have been included in the animation
+            'PIRATES_OF_THE_CARIBBEAN_034', # Image problem?  Bitmap 20 could have been included in the animation
+            'STAR_TREK_020', # Purposely removed?  Bitmap 37 looks out of place compared to rest of animation
+            'STAR_TREK_THE_NEXT_GEN_017', # Image problem?  Bitmap 5 could have been included in the animation
+            'THE_CHAMPION_PUB_007', # Bitmap 12 and 13 are identical, header only references bitmap 12
+            'THE_CHAMPION_PUB_010', # Image problem?  Bitmap 1 could have been included in the animation
+            'THE_CHAMPION_PUB_025', # Image problem?  Bitmap 6 could have been included in the animation
+            'THE_CHAMPION_PUB_046', # Image problem?  Bitmap 3 could have been included in the animation
+            'THE_CHAMPION_PUB_064', # Bitmap 60 and 61 are identical, header only references bitmap 60
+            'THE_SHADOW_037', # Image problem?  Bitmap 9 could have been included in the animation
+            'THE_WALKING_DEAD_013', # Purposely removed?  Bitmap 75 looks out of place compared to the final animation bitmaps
+            'WHO_DUNNIT_012', # Purposely removed?  Bitmap 7 is axe being pulled back
+            'WHO_DUNNIT_018', # Image problem?  Bitmap 11 could have been included in the animation
+            'WORLD_CUP_SOCCER_017', # Bitmap 5 and 6 are identical, header only references bitmap 5
+            'WORLD_CUP_SOCCER_033', # Bitmap 52 and 53 are identical, header only references bitmap 52
+            'X-MEN_054', # Image problem?  Bitmap 33 could have been included in the animation
         ]
     }
     
